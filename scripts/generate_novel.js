@@ -1,6 +1,12 @@
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const SUPABASE_URL = process.env.SUPABASE_URL.replace(/\/rest\/v1\/?$/, '');
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim().replace(/['"]/g, '');
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim().replace(/['"]/g, '');
+
+// Pembersih otomatis untuk URL Supabase (membuang spasi tak sengaja / tanda petik)
+let rawUrl = (process.env.SUPABASE_URL || 'https://faclnbenlcsuubxexxrx.supabase.co').trim().replace(/['"]/g, '');
+if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
+  rawUrl = 'https://' + rawUrl;
+}
+const SUPABASE_URL = rawUrl.replace(/\/+$/, '').replace(/\/rest\/v1\/?$/, '');
 
 const TABLE_NAME = 'novels'; 
 
@@ -34,7 +40,7 @@ Format JSON yang dibutuhkan:
 }
 `;
 
-  // 2. Gunakan langsung model gemini-3.8-flash sesuai instruksi server Google
+  // 2. Hubungi Gemini API
   console.log('Menghubungi Gemini API (gemini-3.8-flash)...');
   const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
   
@@ -78,8 +84,10 @@ Format JSON yang dibutuhkan:
 
   console.log(`Mengirim novel "${payload.title}" ke Supabase...`);
 
-  // 5. Simpan ke Supabase
+  // 5. Simpan ke Supabase via REST API
   const insertUrl = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
+  console.log(`Target URL Supabase: ${insertUrl}`);
+
   const supabaseRes = await fetch(insertUrl, {
     method: 'POST',
     headers: {
