@@ -1,0 +1,26 @@
+name: Auto Generate Shella Novel
+
+on:
+  schedule:
+    # 08:00 UTC = 15:00 WIB (Tepat jam 3 sore setiap hari)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Memungkinkan tombol 'Run workflow' manual kapan saja
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Generator Script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node scripts/generate_novel.js
