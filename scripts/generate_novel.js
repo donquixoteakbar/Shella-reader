@@ -13,35 +13,7 @@ async function main() {
   const selectedGenre = GENRES[Math.floor(Math.random() * GENRES.length)];
   console.log(`Memulai pembuatan cerita bergenre: ${selectedGenre}`);
 
-  // 1. Deteksi otomatis model yang aktif di akun Google Anda
-  console.log('Mengecek daftar model aktif dari Google API...');
-  const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
-  if (!listRes.ok) {
-    throw new Error(`Gagal cek model (${listRes.status}): ${await listRes.text()}`);
-  }
-  const listData = await listRes.json();
-  const models = listData.models || [];
-  
-  // Tampilkan semua model yang tersedia ke log Actions
-  console.log('Model yang tersedia:', models.map(m => m.name).join(', '));
-
-  // Filter model yang bisa generate konten
-  const validModels = models.filter(m => 
-    m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-  );
-
-  if (validModels.length === 0) {
-    throw new Error('Tidak ada model yang mendukung generateContent pada API key ini.');
-  }
-
-  // Pilih otomatis model flash, atau ambil model pertama yang tersedia
-  const chosenModel = validModels.find(m => m.name.includes('flash')) || 
-                      validModels.find(m => m.name.includes('gemini')) || 
-                      validModels[0];
-
-  console.log(`Menggunakan model otomatis: ${chosenModel.name}`);
-
-  // 2. Prompt instruksi cerita
+  // 1. Prompt instruksi cerita
   const prompt = `
 Bertindaklah sebagai novelis sastra profesional. Tulis sebuah bab cerita lengkap dan mandiri dalam bahasa Indonesia.
 Genre: ${selectedGenre}
@@ -62,8 +34,9 @@ Format JSON yang dibutuhkan:
 }
 `;
 
-  // 3. Panggil endpoint sesuai model yang dideteksi otomatis
-  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/${chosenModel.name}:generateContent?key=${GEMINI_API_KEY}`;
+  // 2. Gunakan langsung model gemini-3.8-flash sesuai instruksi server Google
+  console.log('Menghubungi Gemini API (gemini-3.8-flash)...');
+  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
   
   const response = await fetch(geminiEndpoint, {
     method: 'POST',
@@ -90,10 +63,10 @@ Format JSON yang dibutuhkan:
     novelData = JSON.parse(rawText.replace(/```json\n?|```/g, '').trim());
   }
 
-  // 4. Buat URL Sampul Otomatis
+  // 3. Buat URL Sampul Otomatis (Rasio 2:3)
   const coverUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(novelData.cover_prompt_en)}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
-  // 5. Susun payload database
+  // 4. Susun payload database
   const payload = {
     title: novelData.judul,
     content: novelData.isi_cerita,
@@ -105,7 +78,7 @@ Format JSON yang dibutuhkan:
 
   console.log(`Mengirim novel "${payload.title}" ke Supabase...`);
 
-  // 6. Simpan ke Supabase
+  // 5. Simpan ke Supabase
   const insertUrl = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
   const supabaseRes = await fetch(insertUrl, {
     method: 'POST',
@@ -123,7 +96,7 @@ Format JSON yang dibutuhkan:
     throw new Error(`Gagal menyimpan ke Supabase (${supabaseRes.status}): ${errorBody}`);
   }
 
-  console.log('Novel berhasil diunggah ke Shella Reader!');
+  console.log('Sukses! Novel berhasil diunggah ke Shella Reader.');
 }
 
 main().catch(err => {
