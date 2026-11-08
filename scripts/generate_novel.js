@@ -1,9 +1,5 @@
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
-
-// URL Supabase dikunci permanen agar tidak terkena karakter siluman dari keyboard HP
 const SUPABASE_URL = 'https://faclnbenlcsuubxexxrx.supabase.co';
-
-// Bersihkan karakter tak kasat mata dari API Key Supabase
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || 'sb_publishable_TcuATihcZ7clQA3y7vL3IA_tik3MOuV').replace(/[^a-zA-Z0-9_\-\.]/g, '');
 
 const TABLE_NAME = 'novels'; 
@@ -13,11 +9,61 @@ const GENRES = [
   'Misteri Pembunuhan / Detektif', 'Sci-Fi Petualangan Luar Angkasa', 'Epik Silat Tradisional'
 ];
 
+// Daftar model alternatif jika salah satu server sedang sibuk (503)
+const CANDIDATE_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-flash-latest',
+  'gemini-3.8-flash-lite'
+];
+
+async function callGeminiWithRetry(prompt) {
+  for (const model of CANDIDATE_MODELS) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`Mencoba memanggil model ${model} (Percobaan ke-${attempt})...`);
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        });
+
+        if (response.ok) {
+          const resultData = await response.json();
+          return resultData.candidates[0].content.parts[0].text;
+        }
+
+        const errorText = await response.text();
+        console.warn(`Peringatan server Google (${response.status}): ${errorText}`);
+
+        // Jika server sibuk (503) atau dibatasi (429), tunggu sebentar lalu coba lagi
+        if (response.status === 503 || response.status === 429) {
+          console.log('Server sedang sibuk, menunggu 10 detik...');
+          await new Promise(r => setTimeout(r, 10000));
+          continue;
+        }
+
+        // Jika model tidak ditemukan (404), langsung lewati ke model berikutnya
+        break;
+      } catch (err) {
+        console.warn(`Jaringan terputus sementara: ${err.message}. Mencoba lagi...`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+    console.log(`Beralih ke model cadangan berikutnya...`);
+  }
+  throw new Error('Semua model Gemini sedang sibuk atau tidak merespons.');
+}
+
 async function main() {
   const selectedGenre = GENRES[Math.floor(Math.random() * GENRES.length)];
   console.log(`Memulai pembuatan cerita bergenre: ${selectedGenre}`);
 
-  // 1. Prompt instruksi cerita
   const prompt = `
 Bertindaklah sebagai novelis sastra profesional. Tulis sebuah bab cerita lengkap dan mandiri dalam bahasa Indonesia.
 Genre: ${selectedGenre}
@@ -38,27 +84,7 @@ Format JSON yang dibutuhkan:
 }
 `;
 
-  // 2. Hubungi Gemini API
-  console.log('Menghubungi Gemini API (gemini-3.8-flash)...');
-  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
-  
-  const response = await fetch(geminiEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini API Error: ${response.status} - ${await response.text()}`);
-  }
-
-  const resultData = await response.json();
-  const rawText = resultData.candidates[0].content.parts[0].text;
+  const rawText = await callGeminiWithRetry(prompt);
   
   let novelData;
   try {
@@ -67,10 +93,8 @@ Format JSON yang dibutuhkan:
     novelData = JSON.parse(rawText.replace(/```json\n?|```/g, '').trim());
   }
 
-  // 3. Buat URL Sampul Otomatis
   const coverUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(novelData.cover_prompt_en)}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
-  // 4. Susun data buku
   const payload = {
     title: novelData.judul,
     content: novelData.isi_cerita,
@@ -82,10 +106,7 @@ Format JSON yang dibutuhkan:
 
   console.log(`Mengirim novel "${payload.title}" ke Supabase...`);
 
-  // 5. Simpan ke database Supabase
   const insertUrl = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
-  console.log(`Target URL Supabase: ${insertUrl}`);
-
   const supabaseRes = await fetch(insertUrl, {
     method: 'POST',
     headers: {
@@ -106,6 +127,6 @@ Format JSON yang dibutuhkan:
 }
 
 main().catch(err => {
-  console.error('Terjadi kesalahan:', err);
+  console.error('Terjadi kesalahan fatal:', err);
   process.exit(1);
 });
