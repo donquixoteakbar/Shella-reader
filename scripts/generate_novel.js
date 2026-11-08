@@ -1,12 +1,10 @@
-const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim().replace(/['"]/g, '');
-const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim().replace(/['"]/g, '');
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
-// Pembersih otomatis untuk URL Supabase (membuang spasi tak sengaja / tanda petik)
-let rawUrl = (process.env.SUPABASE_URL || 'https://faclnbenlcsuubxexxrx.supabase.co').trim().replace(/['"]/g, '');
-if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
-  rawUrl = 'https://' + rawUrl;
-}
-const SUPABASE_URL = rawUrl.replace(/\/+$/, '').replace(/\/rest\/v1\/?$/, '');
+// URL Supabase dikunci permanen agar tidak terkena karakter siluman dari keyboard HP
+const SUPABASE_URL = 'https://faclnbenlcsuubxexxrx.supabase.co';
+
+// Bersihkan karakter tak kasat mata dari API Key Supabase
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || 'sb_publishable_TcuATihcZ7clQA3y7vL3IA_tik3MOuV').replace(/[^a-zA-Z0-9_\-\.]/g, '');
 
 const TABLE_NAME = 'novels'; 
 
@@ -69,10 +67,10 @@ Format JSON yang dibutuhkan:
     novelData = JSON.parse(rawText.replace(/```json\n?|```/g, '').trim());
   }
 
-  // 3. Buat URL Sampul Otomatis (Rasio 2:3)
+  // 3. Buat URL Sampul Otomatis
   const coverUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(novelData.cover_prompt_en)}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
-  // 4. Susun payload database
+  // 4. Susun data buku
   const payload = {
     title: novelData.judul,
     content: novelData.isi_cerita,
@@ -84,7 +82,7 @@ Format JSON yang dibutuhkan:
 
   console.log(`Mengirim novel "${payload.title}" ke Supabase...`);
 
-  // 5. Simpan ke Supabase via REST API
+  // 5. Simpan ke database Supabase
   const insertUrl = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
   console.log(`Target URL Supabase: ${insertUrl}`);
 
