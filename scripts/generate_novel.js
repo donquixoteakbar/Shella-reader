@@ -4,55 +4,93 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || 'sb_publishable_TcuATihcZ7clQA
 
 const TABLE_NAME = 'shella_books';
 
-const GENRES = [
-  'Dark Fantasy',
-  'Horor Murni Supranatural',
-  'Romansa Emosional & Realistis',
-  'Misteri Detektif',
-  'Sci-Fi Petualangan Luar Angkasa',
-  'Epik Silat Tradisional'
+const CANDIDATE_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-flash-latest'
 ];
 
-// Pustaka visual aman per genre (Menghindari penolakan / 'Image Refused')
-const GENRE_PROMPTS = {
-  'Dark Fantasy': 'mystic dark fantasy castle, glowing runes, cinematic purple and gold lighting, ethereal landscape, digital painting, elegant art cover',
-  'Horor Murni Supranatural': 'abandoned vintage wooden mansion, mist in deep forest, cold moonlight, atmospheric shadows, spooky aesthetic art',
-  'Romansa Emosional & Realistis': 'warm sunset over coastal town, two silhouettes standing by the train station, anime background style, melancholic romantic lighting',
-  'Misteri Detektif': 'noir vintage detective office, dim street lamps through wet rain window, silhouette with coat, mysterious mood art',
-  'Sci-Fi Petualangan Luar Angkasa': 'deep space nebula, futuristic cosmic spacecraft cruising near ringed planet, neon stars, epic galactic wallpaper',
-  'Epik Silat Tradisional': 'ancient martial artist overlooking misty mountain peaks, waterfall, autumn leaves falling, traditional fantasy ink painting style'
-};
+async function loadAIConfig() {
+  console.log('Membaca konfigurasi dari tabel shella_ai_config...');
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/shella_ai_config?id=eq.main_config`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows && rows[0]) {
+        const row = rows[0];
+        let extra = {};
+        try { extra = JSON.parse(row.custom_instruction || '{}'); } catch(e){}
+        return {
+          main_character: row.main_character || extra.main_character || 'Shella',
+          writing_style: row.writing_style || extra.writing_style || 'Petualangan Hangat & Penuh Nilai Kebaikan',
+          active_genres: row.active_genres || ['Fantasi & Petualangan Ajaib'],
+          target_audience: extra.target_audience || 'sd_mi',
+          moral_message: extra.moral_message || '',
+          custom_title: extra.custom_title || '',
+          story_premise: extra.story_premise || '',
+          supporting_characters: extra.supporting_characters || '',
+          reading_time: parseInt(extra.reading_time) || 15,
+          cover_idea: extra.cover_idea || '',
+          extra_notes: extra.extra_notes || ''
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Gagal membaca shella_ai_config, menggunakan konfigurasi cadangan:', err.message);
+  }
+
+  return {
+    main_character: 'Shella',
+    writing_style: 'Petualangan Hangat & Penuh Nilai Kebaikan',
+    active_genres: ['Fantasi & Petualangan Ajaib', 'Misteri Detektif Sekolah'],
+    target_audience: 'sd_mi',
+    moral_message: 'Kejujuran dan tolong menolong',
+    custom_title: '',
+    story_premise: '',
+    supporting_characters: '',
+    reading_time: 15,
+    cover_idea: '',
+    extra_notes: ''
+  };
+}
 
 async function callGemini(prompt) {
-  const model = 'gemini-3.5-flash';
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-  
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    console.log(`Memanggil model ${model} (Percobaan ke-${attempt})...`);
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      });
+  for (const model of CANDIDATE_MODELS) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`Memanggil model ${model} (Percobaan ke-${attempt})...`);
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          })
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        return data.candidates[0].content.parts[0].text;
-      }
+        if (response.ok) {
+          const resultData = await response.json();
+          if (resultData.candidates && resultData.candidates[0]?.content?.parts?.[0]?.text) {
+            return resultData.candidates[0].content.parts[0].text;
+          }
+        }
 
-      const errText = await response.text();
-      console.warn(`Respon Google (${response.status}): ${errText}`);
-      if (response.status === 503 || response.status === 429) {
-        await new Promise(r => setTimeout(r, 10000));
-        continue;
+        const errText = await response.text();
+        console.warn(`Respon Google (${response.status}): ${errText}`);
+        if (response.status === 503 || response.status === 429) {
+          await new Promise(r => setTimeout(r, 10000));
+          continue;
+        }
+        break;
+      } catch (err) {
+        console.warn(`Jaringan terputus: ${err.message}. Mencoba lagi...`);
+        await new Promise(r => setTimeout(r, 5000));
       }
-      break;
-    } catch (e) {
-      console.warn(`Jaringan terputus: ${e.message}`);
-      await new Promise(r => setTimeout(r, 5000));
     }
   }
   throw new Error('Gagal menghubungi Gemini API.');
@@ -64,53 +102,85 @@ function extractTag(text, tag) {
 }
 
 async function main() {
-  const selectedGenre = GENRES[Math.floor(Math.random() * GENRES.length)];
-  console.log(`Membuat cerita baru dengan genre: ${selectedGenre}`);
+  const config = await loadAIConfig();
+  
+  const genres = Array.isArray(config.active_genres) && config.active_genres.length > 0 
+    ? config.active_genres 
+    : ['Fantasi & Petualangan Ajaib'];
+  const selectedGenre = genres[Math.floor(Math.random() * genres.length)];
+  
+  const targetWords = config.reading_time * 200; // 15 menit = ~3.000 kata
 
-  const prompt = `
-Bertindaklah sebagai novelis sastra profesional. Tulis sebuah bab pembuka novel lengkap dan mandiri dalam bahasa Indonesia.
-Genre: ${selectedGenre}
-
-Aturan Penulisan:
-1. Panjang Tulisan: Minimal 3.000 kata (estimasi membaca santai 15 menit). Cerita mengalir mendalam, sinematik, suasana latar kuat, tanpa alur terburu-buru.
-2. Selesaikan konflik bab pembuka ini secara tuntas tanpa menggantung.
-3. JANGAN gunakan sub-bab atau nomor adegan. Tulis paragraf narasi sastra mengalir.
-4. Tuliskan persis menggunakan tag pemisah berikut:
-
-[JUDUL]
-(Tulis judul buku di sini)
-
-[TAGLINE]
-(Tulis 1 kalimat puitis/dramatis di sini)
-
-[SINOPSIS]
-(Tulis sinopsis ringkas 2 paragraf di sini)
-
-[BAB_JUDUL]
-Bab 1: (Judul bab di sini)
-
-[CERITA]
-(Isi bab lengkap minimal 3000 kata di sini)
-`;
-
-  const rawText = await callGemini(prompt);
-
-  const judul = extractTag(rawText, 'JUDUL') || `Kisah ${selectedGenre}`;
-  const tagline = extractTag(rawText, 'TAGLINE') || 'Sebuah kisah tentang pencarian dan takdir.';
-  const sinopsis = extractTag(rawText, 'SINOPSIS') || 'Kisah yang membawa Anda ke dalam petualangan tak terduga.';
-  const babJudul = extractTag(rawText, 'BAB_JUDUL') || 'Bab 1';
-  let cerita = extractTag(rawText, 'CERITA');
-
-  if (!cerita || cerita.length < 200) {
-    cerita = rawText;
+  let audienceGuide = '';
+  if (config.target_audience === 'sd_mi') {
+    audienceGuide = `
+- TARGET PEMBACA: Siswa tingkat SD/MI.
+- ATURAN BAHASA: Gunakan bahasa Indonesia yang mudah dipahami, lugas, mengalir ceria, kalimat tidak berbelit-belit. Hindari kata-kata yang terlalu berat atau membingungkan anak-anak.
+- NILAI EDUKATIF: Aman, inspiratif, penuh petualangan mendidik, dan tidak mengandung unsur negatif/kasar.`;
+  } else if (config.target_audience === 'remaja') {
+    audienceGuide = `
+- TARGET PEMBACA: Remaja tingkat SMP/SMA.
+- ATURAN BAHASA: Mengalir santai, dialog emosional, pergaulan sehat, penuh semangat muda.`;
+  } else {
+    audienceGuide = `
+- TARGET PEMBACA: Umum / Pecinta sastra.
+- ATURAN BAHASA: Kosakata kaya, metafora puitis, dan suasana sinematik mendalam.`;
   }
 
-  // Generate URL Sampul dengan prompt visual bersih bebas penolakan sensor
-  const visualDesc = encodeURIComponent(GENRE_PROMPTS[selectedGenre] || 'fantasy novel book cover art masterpiece, no text');
-  const coverUrl = `https://image.pollinations.ai/prompt/${visualDesc}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
+  const prompt = `
+Bertindaklah sebagai novelis sastra profesional sekaligus pendidik kreatif. Tulis sebuah bab cerita lengkap dan mandiri dalam bahasa Indonesia.
+Genre Terpilih: ${selectedGenre}
+
+Aturan Penulisan Utama:
+1. Target Panjang Tulisan: Minimal ${targetWords} kata (estimasi membaca santai ${config.reading_time} menit). Cerita harus lengkap dari awal, konflik, hingga penyelesaian tuntas tanpa menggantung.
+2. Gaya Penulisan: ${config.writing_style}
+${audienceGuide}
+3. Tokoh Utama: "${config.main_character}"
+${config.supporting_characters ? `4. Tokoh Pendukung/Kawan: "${config.supporting_characters}" (Wajib diikutsertakan secara aktif dalam dialog dan adegan cerita).` : ''}
+${config.moral_message ? `5. Pesan Moral Wajib: "${config.moral_message}" (Sisipkan pesan ini secara halus dan menyentuh di akhir cerita).` : ''}
+${config.custom_title ? `6. JUDUL BUKU WAJIB: "${config.custom_title}"` : '6. Buat judul buku yang memikat dan sesuai dengan genre.'}
+${config.story_premise ? `7. PREMIS / INTI CERITA WAJIB: "${config.story_premise}" (Kembangkan narasi berdasarkan ide utama ini).` : ''}
+${config.extra_notes ? `8. Instruksi Khusus Tambahan: ${config.extra_notes}` : ''}
+9. Format Teks: JANGAN gunakan sub-bab atau nomor adegan. Tulis langsung paragraf narasi dan dialog yang hidup.
+
+Format Output WAJIB menggunakan penanda berikut:
+
+[JUDUL]
+${config.custom_title || '(Judul buku di sini)'}
+
+[TAGLINE]
+(Satu kalimat kutipan dramatis/puitis yang cocok untuk buku ini)
+
+[SINOPSIS]
+(Ringkasan sinopsis 2 paragraf di sini)
+
+[BAB_JUDUL]
+Bab 1: (Judul bab cerita di sini)
+
+[CERITA]
+(Isi bab lengkap minimal ${targetWords} kata di sini)
+`;
+
+  console.log(`Membuat buku baru (${selectedGenre}) untuk target pembaca: ${config.target_audience}...`);
+  const rawText = await callGemini(prompt);
+
+  const judul = config.custom_title || extractTag(rawText, 'JUDUL') || `Kisah ${selectedGenre}`;
+  const tagline = extractTag(rawText, 'TAGLINE') || 'Sebuah petualangan sarat makna.';
+  const sinopsis = extractTag(rawText, 'SINOPSIS') || 'Kisah petualangan seru yang penuh nilai persahabatan.';
+  const babJudul = extractTag(rawText, 'BAB_JUDUL') || 'Bab 1';
+  let isiCerita = extractTag(rawText, 'CERITA');
+
+  if (!isiCerita || isiCerita.length < 200) {
+    isiCerita = rawText;
+  }
+
+  // Visual prompt cover yang aman dan bebas penolakan
+  const baseVisual = config.cover_idea || `beautiful storybook illustration, ${selectedGenre}, clean art, magical atmosphere, no text`;
+  const cleanCoverPrompt = encodeURIComponent(`digital novel book cover, ${baseVisual}, vibrant lighting, masterpiece`);
+  const coverUrl = `https://image.pollinations.ai/prompt/${cleanCoverPrompt}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
   const bookId = 'book_' + Date.now();
-  const safeDesc = `---META---\nGENRE::${selectedGenre}\nTAGLINE::${tagline}\nNUANSA::${selectedGenre}\n---ENDMETA---\n${sinopsis}`;
+  const safeDesc = `---META---\nGENRE::${selectedGenre}\nTAGLINE::${tagline}\nNUANSA::${config.writing_style}\n---ENDMETA---\n${sinopsis}`;
 
   const bookPayload = {
     id: bookId,
@@ -121,15 +191,15 @@ Bab 1: (Judul bab di sini)
     chapters: [
       {
         title: babJudul,
-        content: cerita
+        content: isiCerita
       }
     ]
   };
 
-  console.log(`Mengirim buku "${bookPayload.title}" ke database Supabase...`);
+  console.log(`Mengunggah novel "${bookPayload.title}" ke Supabase...`);
 
   const insertUrl = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
-  const res = await fetch(insertUrl, {
+  const supabaseRes = await fetch(insertUrl, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_KEY,
@@ -140,11 +210,11 @@ Bab 1: (Judul bab di sini)
     body: JSON.stringify(bookPayload)
   });
 
-  if (!res.ok) {
-    throw new Error(`Gagal menyimpan ke Supabase (${res.status}): ${await res.text()}`);
+  if (!supabaseRes.ok) {
+    throw new Error(`Gagal menyimpan ke Supabase (${supabaseRes.status}): ${await supabaseRes.text()}`);
   }
 
-  console.log(`Sukses! Buku "${bookPayload.title}" berhasil diunggah.`);
+  console.log(`Sukses! Buku "${bookPayload.title}" berhasil diterbitkan.`);
 }
 
 main().catch(err => {
