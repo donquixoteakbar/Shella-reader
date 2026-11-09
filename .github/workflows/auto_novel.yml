@@ -3,7 +3,7 @@ name: Auto Generate Shella Novel
 on:
   schedule:
     # 08:00 UTC = 15:00 WIB (Tepat jam 3 sore setiap hari)
-    - cron: '0 8 * * *'
+    - cron: '5 8 * * *'
   workflow_dispatch: # Memungkinkan tombol 'Run workflow' manual kapan saja
 
 jobs:
