@@ -2,7 +2,7 @@ name: Auto Generate Shella Novel
 
 on:
   schedule:
-    # Berjalan berkala setiap jam untuk mengecek jadwal yang Anda atur di admin-ai
+    # Mengecek antrean rencana di database setiap jam pada menit ke-5
     - cron: '5 * * * *'
   workflow_dispatch:
 
