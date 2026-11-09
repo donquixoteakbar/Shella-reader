@@ -2,14 +2,14 @@ const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const SUPABASE_URL = 'https://faclnbenlcsuubxexxrx.supabase.co';
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || 'sb_publishable_TcuATihcZ7clQA3y7vL3IA_tik3MOuV').replace(/[^a-zA-Z0-9_\-\.]/g, '');
 
-const TABLE_NAME = 'novels'; 
+// Sesuai dengan tabel asli di index.html Shella Reader
+const TABLE_NAME = 'shella_books'; 
 
 const GENRES = [
   'Dark Fantasy', 'Horor Murni Supranatural', 'Romansa Emosional & Realistis', 
   'Misteri Pembunuhan / Detektif', 'Sci-Fi Petualangan Luar Angkasa', 'Epik Silat Tradisional'
 ];
 
-// Daftar model alternatif jika salah satu server sedang sibuk (503)
 const CANDIDATE_MODELS = [
   'gemini-3.8-flash',
   'gemini-3.5-flash',
@@ -41,14 +41,12 @@ async function callGeminiWithRetry(prompt) {
         const errorText = await response.text();
         console.warn(`Peringatan server Google (${response.status}): ${errorText}`);
 
-        // Jika server sibuk (503) atau dibatasi (429), tunggu sebentar lalu coba lagi
         if (response.status === 503 || response.status === 429) {
           console.log('Server sedang sibuk, menunggu 10 detik...');
           await new Promise(r => setTimeout(r, 10000));
           continue;
         }
 
-        // Jika model tidak ditemukan (404), langsung lewati ke model berikutnya
         break;
       } catch (err) {
         console.warn(`Jaringan terputus sementara: ${err.message}. Mencoba lagi...`);
@@ -64,22 +62,26 @@ async function main() {
   const selectedGenre = GENRES[Math.floor(Math.random() * GENRES.length)];
   console.log(`Memulai pembuatan cerita bergenre: ${selectedGenre}`);
 
+  // 1. Prompt instruksi penulisan sastra
   const prompt = `
-Bertindaklah sebagai novelis sastra profesional. Tulis sebuah bab cerita lengkap dan mandiri dalam bahasa Indonesia.
+Bertindaklah sebagai novelis sastra profesional. Tulis sebuah bab pembuka cerita lengkap dan mandiri dalam bahasa Indonesia.
 Genre: ${selectedGenre}
 
 Aturan Penulisan Wajib:
 1. Panjang Tulisan: Minimal 3.000 hingga 4.000 kata (estimasi membaca santai 15 menit). Jangan potong narasi di tengah jalan.
 2. Kedalaman Narasi: Sangat sinematik, kaya akan deskripsi latar suasana tempat, dinamika emosi karakter, serta adegan aksi/konflik yang detail. Hindari alur yang terburu-buru.
 3. Struktur: Selesaikan konflik bab tersebut dengan tuntas. Jangan biarkan cerita menggantung tanpa resolusi yang jelas.
-4. Format Teks: Hanya cantumkan satu Judul Bab di awal baris. JANGAN gunakan sub-bab, bab lanjutan, atau label adegan (seperti "Bagian 1", "Adegan 2", atau tanda pemisah bintang/pagar).
+4. Format Teks: JANGAN gunakan sub-bab atau label adegan (seperti "Bagian 1", "Adegan 2", atau tanda pemisah bintang/pagar). Tulis paragraf narasi mengalir.
 5. Output: Wajib berupa JSON murni tanpa format markdown codeblock seperti \`\`\`json.
 
 Format JSON yang dibutuhkan:
 {
-  "judul": "Judul Bab Yang Menarik",
+  "judul": "Judul Buku/Novel Yang Menarik",
   "genre": "${selectedGenre}",
+  "tagline": "Satu kalimat kutipan puitis atau dramatis terkait buku",
+  "sinopsis": "Ringkasan sinopsis cerita 2-3 paragraf",
   "cover_prompt_en": "Deskripsi visual sampul buku dalam bahasa Inggris untuk image generator, gaya art cover buku, fokus visual utama, pencahayaan dramatis",
+  "bab_judul": "Bab 1: Judul Bab Yang Menarik",
   "isi_cerita": "Teks lengkap bab minimal 3000 kata..."
 }
 `;
@@ -93,20 +95,32 @@ Format JSON yang dibutuhkan:
     novelData = JSON.parse(rawText.replace(/```json\n?|```/g, '').trim());
   }
 
+  // 2. Buat URL Sampul Otomatis (Rasio 2:3)
   const coverUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(novelData.cover_prompt_en)}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
-  const payload = {
+  // 3. Susun data buku persis dengan skema shella_books di index.html
+  const bookId = 'book_' + Date.now();
+  const safeDesc = `---META---\nGENRE::${novelData.genre}\nTAGLINE::${novelData.tagline || ''}\nNUANSA::${selectedGenre}\n---ENDMETA---\n${novelData.sinopsis || ''}`;
+
+  const bookPayload = {
+    id: bookId,
     title: novelData.judul,
-    content: novelData.isi_cerita,
-    genre: novelData.genre,
-    cover_url: coverUrl,
     author: 'Shella Aurelia',
-    created_at: new Date().toISOString()
+    desc: safeDesc,
+    cover: coverUrl,
+    chapters: [
+      {
+        title: novelData.bab_judul || 'Bab 1',
+        content: novelData.isi_cerita
+      }
+    ]
   };
 
-  console.log(`Mengirim novel "${payload.title}" ke Supabase...`);
+  console.log(`Mengirim buku "${bookPayload.title}" ke tabel shella_books...`);
 
+  // 4. Simpan ke database Supabase via REST API
   const insertUrl = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
+
   const supabaseRes = await fetch(insertUrl, {
     method: 'POST',
     headers: {
@@ -115,7 +129,7 @@ Format JSON yang dibutuhkan:
       'Content-Type': 'application/json',
       'Prefer': 'return=representation'
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(bookPayload)
   });
 
   if (!supabaseRes.ok) {
@@ -123,7 +137,7 @@ Format JSON yang dibutuhkan:
     throw new Error(`Gagal menyimpan ke Supabase (${supabaseRes.status}): ${errorBody}`);
   }
 
-  console.log('Sukses! Novel berhasil diunggah ke Shella Reader.');
+  console.log(`Sukses! Novel "${bookPayload.title}" karya Shella Aurelia telah tersimpan dan siap dibaca.`);
 }
 
 main().catch(err => {
