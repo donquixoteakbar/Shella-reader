@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Panel Kontrol AI - Shella Reader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --bg-main: #0f172a;
+      --bg-card: rgba(30, 41, 59, 0.85);
+      --border-color: rgba(255, 255, 255, 0.1);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      padding: 1rem;
+      min-height: 100vh;
+      background-image: radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+                        radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
+    }
+    .container { max-width: 580px; margin: 0 auto; padding-bottom: 2rem; }
+    header { text-align: center; margin-bottom: 1.5rem; }
+    h1 { font-family: 'Cinzel', serif; font-size: 1.6rem; color: #fff; margin-bottom: 0.3rem; }
+    p.subtitle { font-size: 0.8rem; color: var(--text-muted); }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 1.2rem;
+      margin-bottom: 1.2rem;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    }
+    .section-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #a5b4fc;
+      margin-bottom: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      border-bottom: 1px dashed rgba(255,255,255,0.1);
+      padding-bottom: 0.4rem;
+    }
+    .form-group { margin-bottom: 1rem; }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 0.35rem;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 0.75rem;
+      background: #0b1120;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+    .hint { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem; }
+    
+    .btn-submit {
+      width: 100%;
+      padding: 0.9rem;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+      transition: transform 0.1s;
+    }
+    .btn-submit:active { transform: scale(0.98); }
+    .btn-cancel {
+      width: 100%;
+      padding: 0.6rem;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      display: none;
+    }
+    #status-msg { text-align: center; margin-top: 0.8rem; font-size: 0.85rem; font-weight: 600; }
+    
+    /* DAFTAR STATUS RENCANA */
+    .task-item {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 0.9rem;
+      margin-bottom: 0.7rem;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.2s;
+    }
+    .task-item:active { transform: scale(0.98); }
+    .task-item:hover { border-color: rgba(99, 102, 241, 0.6); }
+    .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.3rem;
+    }
+    .badge {
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-rencana { background: rgba(234, 179, 8, 0.2); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.4); }
+    .badge-sedang_berjalan { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); }
+    .badge-selesai { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-gagal { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+    
+    /* MODAL POP-UP DETAIL */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(6px);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-card {
+      background: #1e293b;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 500px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      animation: popIn 0.2s ease-out;
+    }
+    @keyframes popIn {
+      from { transform: scale(0.92); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .modal-header {
+      padding: 1rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-title { font-size: 1rem; font-weight: 700; color: #fff; }
+    .btn-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 0.2rem 0.5rem;
+    }
+    .modal-body {
+      padding: 1rem;
+      overflow-y: auto;
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+    .detail-row {
+      background: rgba(15, 23, 42, 0.5);
+      padding: 0.6rem 0.8rem;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .detail-label {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .detail-value {
+      color: #f8fafc;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .modal-actions {
+      padding: 0.8rem 1rem;
+      border-top: 1px solid var(--border-color);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+      background: rgba(15, 23, 42, 0.4);
+    }
+    .btn-action-edit {
+      padding: 0.65rem;
+      background: #3b82f6;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-action-delete {
+      padding: 0.65rem;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      color: #f87171;
+      font-weight: 600;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⚙️ Kontrol & Jadwal AI</h1>
+      <p class="subtitle">Buat rencana novel baru & pantau proses pengerjaannya</p>
+    </header>
+
+    <!-- STATUS PENGERJAAN & RENCANA -->
+    <div class="card">
+      <div class="section-title">📊 Status Rencana & Eksekusi</div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.6rem;">💡 Ketuk rencana untuk melihat perintah detail, edit, atau hapus.</div>
+      <div id="tasks-list">
+        <div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 1rem;">Memuat daftar rencana...</div>
+      </div>
+    </div>
+
+    <!-- FORMULIR INPUT KETIKAN BEBAS -->
+    <div class="card" id="form-card">
+      <div class="section-title" id="form-title">📝 Buat Rencana Novel Baru</div>
+
+      <div class="form-group">
+        <label>Jam Eksekusi AI (WIB):</label>
+        <input type="text" id="scheduled_time" value="15:00" placeholder="Contoh: 15:00 atau 19:30">
+        <div class="hint">Tulis jam berapa robot AI harus mulai menulis novel ini.</div>
+      </div>
+
+      <div class="form-group">
+        <label>Model AI yang Digunakan:</label>
+        <input type="text" id="ai_model" value="gemini-3.5-flash" placeholder="Contoh: gemini-3.5-flash, gpt-4o-mini, dsb.">
+      </div>
+
+      <div class="form-group">
+        <label>Target Pembaca & Bahasa:</label>
+        <input type="text" id="target_audience" value="Anak SD/MI kelas 4-6, bahasa mudah dicerna, mengalir ceria, edukatif">
+      </div>
+
+      <div class="form-group">
+        <label>Gaya & Nuansa Penulisan:</label>
+        <input type="text" id="writing_style" value="Petualangan seru, penuh teka-teki, hangat, dan sarat adegan bermakna">
+      </div>
+
+      <div class="form-group">
+        <label>Judul Buku (Boleh Kosong):</label>
+        <input type="text" id="custom_title" placeholder="Ketik judul buku, atau kosongkan agar AI membuat sendiri">
+      </div>
+
+      <div class="form-group">
+        <label>Ide Inti / Garis Besar Cerita:</label>
+        <textarea id="story_premise" rows="3" placeholder="Ketik alur cerita yang Anda inginkan secara bebas..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Nama Tokoh Utama:</label>
+        <input type="text" id="main_character" value="Shella">
+      </div>
+
+      <div class="form-group">
+        <label>Tokoh Pendukung / Sahabat:</label>
+        <input type="text" id="supporting_characters" placeholder="Contoh: Ali sang ahli strategi catur, Budi temannya yang cerdik">
+      </div>
+
+      <div class="form-group">
+        <label>Pesan Moral / Nilai Karakter:</label>
+        <input type="text" id="moral_message" placeholder="Contoh: Kejujuran, pantang menyerah, tolong-menolong">
+      </div>
+
+      <div class="form-group">
+        <label>Target Panjang Bacaan / Kata:</label>
+        <input type="text" id="reading_time" value="15 menit (sekitar 3000 kata)">
+      </div>
+
+      <div class="form-group">
+        <label>Ide Gambar Sampul:</label>
+        <input type="text" id="cover_idea" placeholder="Contoh: Anak membaca buku di bawah langit malam penuh rasi bintang">
+      </div>
+
+      <div class="form-group">
+        <label>Catatan Tambahan Bebas:</label>
+        <textarea id="extra_notes" rows="2" placeholder="Instruksi khusus tambahan apa pun untuk robot AI..."></textarea>
+      </div>
+
+      <button class="btn-submit" id="btn-submit-plan" onclick="submitPlan()">➕ Masukkan ke Rencana AI</button>
+      <button class="btn-cancel" id="btn-cancel-edit" onclick="cancelEdit()">Batal Edit Mode</button>
+      <div id="status-msg"></div>
+    </div>
+  </div>
+
+  <!-- POP-UP MODAL DETAIL RENCANA -->
+  <div class="modal-overlay" id="detail-modal" onclick="closeModalOnBackdrop(event)">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-task-title">Detail Rencana</div>
+        <button class="btn-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body" id="modal-task-content"></div>
+      <div class="modal-actions">
+        <button class="btn-action-edit" onclick="startEditCurrentTask()">✏️ Edit</button>
+        <button class="btn-action-delete" onclick="deleteCurrentTask()">🗑️ Hapus</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://faclnbenlcsuubxexxrx.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_TcuATihcZ7clQA3y7vL3IA_tik3MOuV';
+
+    let currentLoadedTasks = [];
+    let selectedTaskId = null;
+    let editingTaskId = null;
+
+    async function loadTasks() {
+      const container = document.getElementById('tasks-list');
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/shella_ai_tasks?select=*&order=id.desc&limit=10`, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        });
+        const tasks = await res.json();
+        currentLoadedTasks = tasks || [];
+
+        if (!tasks || tasks.length === 0) {
+          container.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 1rem;">Belum ada rencana yang dibuat.</div>';
+          return;
+        }
+
+        container.innerHTML = '';
+        tasks.forEach(t => {
+          let labelStatus = 'Dalam Rencana';
+          if (t.status === 'sedang_berjalan') labelStatus = 'Sedang Berjalan ⏳';
+          if (t.status === 'selesai') labelStatus = 'Selesai Diterbitkan ✅';
+          if (t.status === 'gagal') labelStatus = 'Gagal ❌';
+
+          const div = document.createElement('div');
+          div.className = 'task-item';
+          div.onclick = () => openTaskDetail(t.id);
+          div.innerHTML = `
+            <div class="task-header">
+              <span style="font-weight: 700; font-size: 0.85rem; color: #fff;">${t.title || 'Judul Otomatis AI'}</span>
+              <span class="badge badge-${t.status}">${labelStatus}</span>
+            </div>
+            <div style="font-size: 0.75rem; color: #cbd5e1;">⏰ Eksekusi: <b>${t.scheduled_time || '15:00'} WIB</b> | Model: <b>${t.ai_model}</b></div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); margin-top:2px;">${t.story_premise ? t.story_premise.substring(0, 75) + '...' : 'Premis acak'}</div>
+          `;
+          container.appendChild(div);
+        });
+      } catch (e) {
+        container.innerHTML = '<div style="font-size: 0.75rem; color: #f87171;">Gagal mengambil antrean rencana.</div>';
+      }
+    }
+
+    function openTaskDetail(id) {
+      const t = currentLoadedTasks.find(item => item.id === id);
+      if (!t) return;
+      selectedTaskId = id;
+
+      document.getElementById('modal-task-title').innerText = t.title || 'Judul Otomatis AI';
+
+      const fields = [
+        { label: 'Status Pengerjaan', value: t.status ? t.status.toUpperCase() : 'RENCANA' },
+        { label: 'Jam Eksekusi', value: `${t.scheduled_time || '15:00'} WIB` },
+        { label: 'Model AI', value: t.ai_model || 'gemini-3.5-flash' },
+        { label: 'Target Pembaca & Bahasa', value: t.target_audience || '-' },
+        { label: 'Gaya & Nuansa Penulisan', value: t.writing_style || '-' },
+        { label: 'Ide Inti / Premis Cerita', value: t.story_premise || '-' },
+        { label: 'Tokoh Utama', value: t.main_character || 'Shella' },
+        { label: 'Tokoh Pendukung', value: t.supporting_characters || '-' },
+        { label: 'Pesan Moral', value: t.moral_message || '-' },
+        { label: 'Target Panjang Bacaan', value: t.reading_time || '-' },
+        { label: 'Ide Gambar Sampul', value: t.cover_idea || '-' },
+        { label: 'Catatan Khusus Tambahan', value: t.extra_notes || '-' }
+      ];
+
+      const body = document.getElementById('modal-task-content');
+      body.innerHTML = '';
+      fields.forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'detail-row';
+        row.innerHTML = `<div class="detail-label">${f.label}</div><div class="detail-value">${f.value}</div>`;
+        body.appendChild(row);
+      });
+
+      document.getElementById('detail-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('detail-modal').classList.remove('active');
+      selectedTaskId = null;
+    }
+
+    function closeModalOnBackdrop(e) {
+      if (e.target.id === 'detail-modal') closeModal();
+    }
+
+    async function deleteCurrentTask() {
+      if (!selectedTaskId) return;
+      if (!confirm('Yakin ingin menghapus rencana tugas ini dari sistem?')) return;
+
+      const deleteId = selectedTaskId;
+      closeModal();
+
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/shella_ai_tasks?id=eq.${deleteId}`, {
+        method: 'DELETE',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+
+      if (res.ok) {
+        alert('Rencana berhasil dihapus!');
+        loadTasks();
+      } else {
+        alert('Gagal menghapus rencana.');
+      }
+    }
+
+    function startEditCurrentTask() {
+      const t = currentLoadedTasks.find(item => item.id === selectedTaskId);
+      if (!t) return;
+
+      editingTaskId = t.id;
+      closeModal();
+
+      document.getElementById('scheduled_time').value = t.scheduled_time || '15:00';
+      document.getElementById('ai_model').value = t.ai_model || 'gemini-3.5-flash';
+      document.getElementById('target_audience').value = t.target_audience || '';
+      document.getElementById('writing_style').value = t.writing_style || '';
+      document.getElementById('custom_title').value = t.title || '';
+      document.getElementById('story_premise').value = t.story_premise || '';
+      document.getElementById('main_character').value = t.main_character || 'Shella';
+      document.getElementById('supporting_characters').value = t.supporting_characters || '';
+      document.getElementById('moral_message').value = t.moral_message || '';
+      document.getElementById('reading_time').value = t.reading_time || '';
+      document.getElementById('cover_idea').value = t.cover_idea || '';
+      document.getElementById('extra_notes').value = t.extra_notes || '';
+
+      document.getElementById('form-title').innerText = '✏️ Edit Rencana AI';
+      document.getElementById('btn-submit-plan').innerText = '💾 Simpan Perubahan Rencana';
+      document.getElementById('btn-cancel-edit').style.display = 'block';
+
+      document.getElementById('form-card').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function cancelEdit() {
+      editingTaskId = null;
+      document.getElementById('form-title').innerText = '📝 Buat Rencana Novel Baru';
+      document.getElementById('btn-submit-plan').innerText = '➕ Masukkan ke Rencana AI';
+      document.getElementById('btn-cancel-edit').style.display = 'none';
+
+      document.getElementById('custom_title').value = '';
+      document.getElementById('story_premise').value = '';
+      document.getElementById('supporting_characters').value = '';
+      document.getElementById('moral_message').value = '';
+      document.getElementById('cover_idea').value = '';
+      document.getElementById('extra_notes').value = '';
+    }
+
+    async function submitPlan() {
+      const status = document.getElementById('status-msg');
+      status.style.color = '#818cf8';
+      status.innerText = editingTaskId ? 'Memperbarui rencana...' : 'Menyimpan rencana baru...';
+
+      const payload = {
+        title: document.getElementById('custom_title').value.trim() || null,
+        story_premise: document.getElementById('story_premise').value.trim() || null,
+        target_audience: document.getElementById('target_audience').value.trim(),
+        writing_style: document.getElementById('writing_style').value.trim(),
+        main_character: document.getElementById('main_character').value.trim() || 'Shella',
+        supporting_characters: document.getElementById('supporting_characters').value.trim() || null,
+        moral_message: document.getElementById('moral_message').value.trim() || null,
+        reading_time: document.getElementById('reading_time').value.trim(),
+        ai_model: document.getElementById('ai_model').value.trim() || 'gemini-3.5-flash',
+        scheduled_time: document.getElementById('scheduled_time').value.trim() || '15:00',
+        cover_idea: document.getElementById('cover_idea').value.trim() || null,
+        extra_notes: document.getElementById('extra_notes').value.trim() || null,
+        status: 'rencana'
+      };
+
+      try {
+        let endpoint = `${SUPABASE_URL}/rest/v1/shella_ai_tasks`;
+        let method = 'POST';
+
+        if (editingTaskId) {
+          endpoint = `${SUPABASE_URL}/rest/v1/shella_ai_tasks?id=eq.${editingTaskId}`;
+          method = 'PATCH';
+        }
+
+        const res = await fetch(endpoint, {
+          method: method,
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          status.style.color = '#10b981';
+          status.innerText = editingTaskId ? '✅ Rencana berhasil diperbarui!' : '✅ Rencana baru berhasil ditambahkan!';
+          cancelEdit();
+          loadTasks();
+        } else {
+          status.style.color = '#f87171';
+          status.innerText = '❌ Gagal: ' + (await res.text());
+        }
+      } catch (err) {
+        status.style.color = '#f87171';
+        status.innerText = '❌ Eror koneksi: ' + err.message;
+      }
+    }
+
+    window.onload = loadTasks;
+    setInterval(loadTasks, 15000);
+  </script>
+</body>
+</html>
