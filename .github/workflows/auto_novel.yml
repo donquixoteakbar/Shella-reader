@@ -2,9 +2,9 @@ name: Auto Generate Shella Novel
 
 on:
   schedule:
-    # 08:00 UTC = 15:00 WIB (Tepat jam 3 sore setiap hari)
-    - cron: '5 8 * * *'
-  workflow_dispatch: # Memungkinkan tombol 'Run workflow' manual kapan saja
+    # Berjalan berkala setiap jam untuk mengecek jadwal yang Anda atur di admin-ai
+    - cron: '5 * * * *'
+  workflow_dispatch:
 
 jobs:
   generate:
@@ -16,11 +16,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
 
       - name: Run Generator Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: node scripts/generate_novel.js
