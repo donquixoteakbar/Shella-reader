@@ -6,20 +6,7 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || 'sb_publishable_TcuATihcZ7clQA
 const TABLE_BOOKS = 'shella_books';
 const TABLE_TASKS = 'shella_ai_tasks';
 
-// 1. Ambil waktu sekarang dalam WIB (UTC+7)
-function getCurrentWIB() {
-  const now = new Date();
-  const utcHours = now.getUTCHours();
-  const utcMinutes = now.getUTCMinutes();
-  const wibHours = (utcHours + 7) % 24;
-  return {
-    hours: wibHours,
-    minutes: utcMinutes,
-    timeString: `${String(wibHours).padStart(2, '0')}:${String(utcMinutes).padStart(2, '0')}`
-  };
-}
-
-// 2. Ambil antrean tugas teratas
+// 1. Ambil antrean rencana teratas yang masih berstatus 'rencana'
 async function getPendingTask() {
   console.log('Mengecek antrean tugas di shella_ai_tasks...');
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_TASKS}?status=eq.rencana&order=id.asc&limit=1`, {
@@ -32,7 +19,36 @@ async function getPendingTask() {
   return null;
 }
 
-// 3. Update status tugas
+// 2. Cek apakah rencana sudah tiba/lewat waktunya (Anti-Bug Ganti Hari)
+function isTaskDue(task) {
+  if (!task.scheduled_time) return true;
+
+  const timeStr = String(task.scheduled_time).replace('.', ':').trim();
+  const parts = timeStr.split(':');
+  const planHour = parseInt(parts[0], 10);
+  const planMinute = parts[1] ? parseInt(parts[1], 10) : 0;
+
+  if (isNaN(planHour)) return true; // Format bebas/kosong = jalankan langsung
+
+  // Ambil waktu pembuatan tugas (UTC) lalu konversi ke WIB (UTC+7)
+  const createdDate = task.created_at ? new Date(task.created_at) : new Date();
+  const createdWIB = new Date(createdDate.getTime() + (7 * 60 * 60 * 1000));
+
+  // Tentukan target eksekusi pada tanggal pembuatan tersebut
+  const targetWIB = new Date(createdWIB);
+  targetWIB.setUTCHours(planHour, planMinute, 0, 0);
+
+  // Waktu saat ini di WIB
+  const nowWIB = new Date(Date.now() + (7 * 60 * 60 * 1000));
+
+  console.log(`Jadwal Rencana: ${task.scheduled_time} WIB`);
+  console.log(`Target Penuh WIB : ${targetWIB.toISOString()}`);
+  console.log(`Waktu Sekarang WIB: ${nowWIB.toISOString()}`);
+
+  // Jika waktu sekarang sudah sama atau melewati target, WAJIB JALAN
+  return nowWIB.getTime() >= targetWIB.getTime();
+}
+
 async function updateTaskStatus(taskId, status, extraData = {}) {
   await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_TASKS}?id=eq.${taskId}`, {
     method: 'PATCH',
@@ -45,14 +61,13 @@ async function updateTaskStatus(taskId, status, extraData = {}) {
   });
 }
 
-// 4. Generator Teks Multi-AI (Gemini / OpenAI)
 async function callAI(modelName, prompt) {
   const isGPT = modelName.toLowerCase().includes('gpt') || modelName.toLowerCase().includes('openai');
 
   if (isGPT) {
-    console.log(`Menggunakan OpenAI Model: ${modelName}...`);
+    console.log(`Menggunakan OpenAI: ${modelName}...`);
     if (!OPENAI_API_KEY) {
-      console.warn('OPENAI_API_KEY tidak ditemukan di Secrets! Beralih otomatis ke Gemini.');
+      console.warn('OPENAI_API_KEY kosong! Dialihkan ke Gemini.');
       return await callGemini('gemini-3.5-flash', prompt);
     }
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -75,7 +90,7 @@ async function callAI(modelName, prompt) {
 
 async function callGemini(modelName, prompt) {
   const cleanModel = modelName.includes('gemini') ? modelName : 'gemini-3.5-flash';
-  console.log(`Menggunakan Gemini Model: ${cleanModel}...`);
+  console.log(`Menggunakan Gemini: ${cleanModel}...`);
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${GEMINI_API_KEY}`;
   
   const response = await fetch(endpoint, {
@@ -99,27 +114,19 @@ function extractTag(text, tag) {
 }
 
 async function main() {
-  const nowWIB = getCurrentWIB();
-  console.log(`Waktu server saat ini: ${nowWIB.timeString} WIB`);
-
   const task = await getPendingTask();
 
   if (!task) {
-    console.log('Tidak ada rencana kerja bertatus "rencana". Workflow berhenti dengan sukses.');
+    console.log('Tidak ada rencana tugas baru bertatus "rencana". Berhenti.');
     return;
   }
 
-  // Cek jam eksekusi
-  if (task.scheduled_time) {
-    const [planHour] = task.scheduled_time.split(':').map(Number);
-    // Jika jam sekarang belum mencapai jam rencana, tunda dulu
-    if (nowWIB.hours < planHour) {
-      console.log(`Rencana dijadwalkan pukul ${task.scheduled_time} WIB. Sekarang baru pukul ${nowWIB.timeString} WIB. Menunggu giliran.`);
-      return;
-    }
+  if (!isTaskDue(task)) {
+    console.log('Waktu jadwal belum tiba. Menunggu putaran berikutnya.');
+    return;
   }
 
-  console.log(`Memulai pengerjaan rencana #${task.id}: "${task.title || 'Novel Baru'}"`);
+  console.log(`Memproses rencana #${task.id}: "${task.title || 'Novel Baru'}"...`);
   await updateTaskStatus(task.id, 'sedang_berjalan');
 
   try {
@@ -131,7 +138,7 @@ Aturan Penulisan:
 - Gaya Cerita: ${task.writing_style || 'Petualangan hangat dan mendidik'}
 - Target Panjang Bacaan: ${task.reading_time || '15 menit (sekitar 3000 kata)'}. Cerita harus tuntas, utuh, tanpa sub-bab.
 - Tokoh Utama: "${task.main_character || 'Shella'}"
-${task.supporting_characters ? `- Tokoh Sahabat/Pendukung: "${task.supporting_characters}" (Hadirkan aktif dalam cerita).` : ''}
+${task.supporting_characters ? `- Tokoh Sahabat/Pendukung: "${task.supporting_characters}" (Wajib aktif dalam dialog).` : ''}
 ${task.moral_message ? `- Nilai Moral: "${task.moral_message}" (Sisipkan secara halus di akhir).` : ''}
 ${task.title ? `- JUDUL BUKU WAJIB: "${task.title}"` : '- Tentukan judul yang memikat.'}
 ${task.story_premise ? `- PREMIS UTAMA: "${task.story_premise}"` : ''}
@@ -151,14 +158,14 @@ ${task.title || '(Judul buku di sini)'}
 Bab 1: (Judul bab di sini)
 
 [CERITA]
-(Isi cerita bab lengkap tanpa sub-bab)
+(Isi cerita bab lengkap tanpa sub-bab minimal 3000 kata)
 `;
 
     const rawText = await callAI(task.ai_model || 'gemini-3.5-flash', prompt);
 
     const finalTitle = task.title || extractTag(rawText, 'JUDUL') || 'Kisah Petualangan Shella';
     const tagline = extractTag(rawText, 'TAGLINE') || 'Sebuah petualangan sarat makna.';
-    const sinopsis = extractTag(rawText, 'SINOPSIS') || 'Kisah yang membawa Anda ke dalam petualangan tak terduga.';
+    const sinopsis = extractTag(rawText, 'SINOPSIS') || 'Kisah petualangan yang membawa kehangatan dan pelajaran berharga.';
     const babJudul = extractTag(rawText, 'BAB_JUDUL') || 'Bab 1';
     let cerita = extractTag(rawText, 'CERITA');
 
@@ -166,8 +173,8 @@ Bab 1: (Judul bab di sini)
       cerita = rawText;
     }
 
-    const coverPrompt = task.cover_idea || `${finalTitle}, children storybook illustration, vibrant clean art`;
-    const cleanCoverPrompt = encodeURIComponent(`digital novel book cover, ${coverPrompt}, beautiful soft lighting, masterpiece`);
+    const coverPrompt = task.cover_idea || `${finalTitle}, storybook illustration, vibrant clean art`;
+    const cleanCoverPrompt = encodeURIComponent(`digital novel book cover, ${coverPrompt}, beautiful lighting, clean illustration`);
     const coverUrl = `https://image.pollinations.ai/prompt/${cleanCoverPrompt}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
     const bookPayload = {
@@ -179,7 +186,7 @@ Bab 1: (Judul bab di sini)
       chapters: [{ title: babJudul, content: cerita }]
     };
 
-    console.log(`Mengirim buku "${bookPayload.title}" ke database Shella Reader...`);
+    console.log(`Mengirim novel "${bookPayload.title}" ke database Shella Reader...`);
     const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_BOOKS}`, {
       method: 'POST',
       headers: {
@@ -195,7 +202,6 @@ Bab 1: (Judul bab di sini)
       throw new Error(`Gagal menyimpan ke ${TABLE_BOOKS}: ${await insertRes.text()}`);
     }
 
-    // Tandai tugas sebagai selesai
     await updateTaskStatus(task.id, 'selesai', {
       result_book_title: finalTitle,
       executed_at: new Date().toISOString()
