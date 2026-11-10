@@ -6,7 +6,14 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || 'sb_publishable_TcuATihcZ7clQA
 const TABLE_BOOKS = 'shella_books';
 const TABLE_TASKS = 'shella_ai_tasks';
 
-// 1. Ambil antrean rencana teratas yang masih berstatus 'rencana'
+// Daftar urutan model Gemini jika model utama sedang sibuk 503
+const GEMINI_FALLBACK_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-flash-latest',
+  'gemini-2.5-flash',
+  'gemini-3.8-flash'
+];
+
 async function getPendingTask() {
   console.log('Mengecek antrean tugas di shella_ai_tasks...');
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_TASKS}?status=eq.rencana&order=id.asc&limit=1`, {
@@ -19,7 +26,6 @@ async function getPendingTask() {
   return null;
 }
 
-// 2. Cek apakah rencana sudah tiba/lewat waktunya (Anti-Bug Ganti Hari)
 function isTaskDue(task) {
   if (!task.scheduled_time) return true;
 
@@ -28,24 +34,20 @@ function isTaskDue(task) {
   const planHour = parseInt(parts[0], 10);
   const planMinute = parts[1] ? parseInt(parts[1], 10) : 0;
 
-  if (isNaN(planHour)) return true; // Format bebas/kosong = jalankan langsung
+  if (isNaN(planHour)) return true;
 
-  // Ambil waktu pembuatan tugas (UTC) lalu konversi ke WIB (UTC+7)
   const createdDate = task.created_at ? new Date(task.created_at) : new Date();
   const createdWIB = new Date(createdDate.getTime() + (7 * 60 * 60 * 1000));
 
-  // Tentukan target eksekusi pada tanggal pembuatan tersebut
   const targetWIB = new Date(createdWIB);
   targetWIB.setUTCHours(planHour, planMinute, 0, 0);
 
-  // Waktu saat ini di WIB
   const nowWIB = new Date(Date.now() + (7 * 60 * 60 * 1000));
 
   console.log(`Jadwal Rencana: ${task.scheduled_time} WIB`);
   console.log(`Target Penuh WIB : ${targetWIB.toISOString()}`);
   console.log(`Waktu Sekarang WIB: ${nowWIB.toISOString()}`);
 
-  // Jika waktu sekarang sudah sama atau melewati target, WAJIB JALAN
   return nowWIB.getTime() >= targetWIB.getTime();
 }
 
@@ -61,14 +63,14 @@ async function updateTaskStatus(taskId, status, extraData = {}) {
   });
 }
 
-async function callAI(modelName, prompt) {
-  const isGPT = modelName.toLowerCase().includes('gpt') || modelName.toLowerCase().includes('openai');
+async function callAI(requestedModel, prompt) {
+  const isGPT = requestedModel && (requestedModel.toLowerCase().includes('gpt') || requestedModel.toLowerCase().includes('openai'));
 
   if (isGPT) {
-    console.log(`Menggunakan OpenAI: ${modelName}...`);
+    console.log(`Menggunakan OpenAI: ${requestedModel}...`);
     if (!OPENAI_API_KEY) {
       console.warn('OPENAI_API_KEY kosong! Dialihkan ke Gemini.');
-      return await callGemini('gemini-3.5-flash', prompt);
+      return await callGeminiWithRetry(prompt);
     }
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -77,35 +79,63 @@ async function callAI(modelName, prompt) {
         'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
       body: JSON.stringify({
-        model: modelName,
+        model: requestedModel,
         messages: [{ role: 'user', content: prompt }]
       })
     });
     const data = await res.json();
     return data.choices[0].message.content;
-  } else {
-    return await callGemini(modelName, prompt);
   }
+
+  // Pemanggilan Gemini dengan sistem anti-503
+  return await callGeminiWithRetry(prompt, requestedModel);
 }
 
-async function callGemini(modelName, prompt) {
-  const cleanModel = modelName.includes('gemini') ? modelName : 'gemini-3.5-flash';
-  console.log(`Menggunakan Gemini: ${cleanModel}...`);
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${GEMINI_API_KEY}`;
-  
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }]
-    })
-  });
+async function callGeminiWithRetry(prompt, preferredModel) {
+  // Susun daftar model dengan memprioritaskan pilihan user
+  const modelQueue = preferredModel && preferredModel.startsWith('gemini')
+    ? [preferredModel, ...GEMINI_FALLBACK_MODELS.filter(m => m !== preferredModel)]
+    : GEMINI_FALLBACK_MODELS;
 
-  if (!response.ok) {
-    throw new Error(`Gemini Error (${response.status}): ${await response.text()}`);
+  for (const model of modelQueue) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`Mencoba model ${model} (Percobaan ke-${attempt})...`);
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+            return data.candidates[0].content.parts[0].text;
+          }
+        }
+
+        const errText = await response.text();
+        console.warn(`Peringatan server (${response.status}): ${errText}`);
+
+        // Jika kena 503 (sibuk) atau 429 (kuota padat), tunggu 10 detik lalu coba lagi
+        if (response.status === 503 || response.status === 429) {
+          console.log('Server Google sedang sibuk, menunggu 10 detik...');
+          await new Promise(r => setTimeout(r, 10000));
+          continue;
+        }
+
+        break;
+      } catch (e) {
+        console.warn(`Gangguan jaringan: ${e.message}. Menunggu 5 detik...`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+    console.log(`Model ${model} masih sibuk, beralih otomatis ke model alternatif...`);
   }
-  const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+
+  throw new Error('Semua model Gemini sedang kelebihan beban saat ini.');
 }
 
 function extractTag(text, tag) {
@@ -117,12 +147,12 @@ async function main() {
   const task = await getPendingTask();
 
   if (!task) {
-    console.log('Tidak ada rencana tugas baru bertatus "rencana". Berhenti.');
+    console.log('Tidak ada tugas dengan status "rencana". Berhenti.');
     return;
   }
 
   if (!isTaskDue(task)) {
-    console.log('Waktu jadwal belum tiba. Menunggu putaran berikutnya.');
+    console.log('Waktu jadwal belum tiba. Menunggu giliran berikutnya.');
     return;
   }
 
@@ -131,7 +161,7 @@ async function main() {
 
   try {
     const prompt = `
-Bertindaklah sebagai novelis sastra profesional dan pendidik. Tulis bab cerita lengkap dan mandiri dalam bahasa Indonesia.
+Bertindaklah sebagai novelis sastra profesional dan pendidik kreatif. Tulis bab cerita lengkap dan mandiri dalam bahasa Indonesia.
 
 Aturan Penulisan:
 - Target Pembaca: ${task.target_audience || 'Mudah dipahami anak SD/MI'}
@@ -158,14 +188,14 @@ ${task.title || '(Judul buku di sini)'}
 Bab 1: (Judul bab di sini)
 
 [CERITA]
-(Isi cerita bab lengkap tanpa sub-bab minimal 3000 kata)
+(Isi cerita bab lengkap tanpa sub-bab)
 `;
 
     const rawText = await callAI(task.ai_model || 'gemini-3.5-flash', prompt);
 
     const finalTitle = task.title || extractTag(rawText, 'JUDUL') || 'Kisah Petualangan Shella';
     const tagline = extractTag(rawText, 'TAGLINE') || 'Sebuah petualangan sarat makna.';
-    const sinopsis = extractTag(rawText, 'SINOPSIS') || 'Kisah petualangan yang membawa kehangatan dan pelajaran berharga.';
+    const sinopsis = extractTag(rawText, 'SINOPSIS') || 'Kisah petualangan seru yang membawa pelajaran berharga.';
     const babJudul = extractTag(rawText, 'BAB_JUDUL') || 'Bab 1';
     let cerita = extractTag(rawText, 'CERITA');
 
@@ -174,7 +204,7 @@ Bab 1: (Judul bab di sini)
     }
 
     const coverPrompt = task.cover_idea || `${finalTitle}, storybook illustration, vibrant clean art`;
-    const cleanCoverPrompt = encodeURIComponent(`digital novel book cover, ${coverPrompt}, beautiful lighting, clean illustration`);
+    const cleanCoverPrompt = encodeURIComponent(`digital novel book cover, ${coverPrompt}, beautiful soft lighting, clean masterpiece`);
     const coverUrl = `https://image.pollinations.ai/prompt/${cleanCoverPrompt}?width=720&height=1080&nologo=true&seed=${Date.now()}`;
 
     const bookPayload = {
@@ -186,7 +216,7 @@ Bab 1: (Judul bab di sini)
       chapters: [{ title: babJudul, content: cerita }]
     };
 
-    console.log(`Mengirim novel "${bookPayload.title}" ke database Shella Reader...`);
+    console.log(`Mengirim novel "${bookPayload.title}" ke database...`);
     const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE_BOOKS}`, {
       method: 'POST',
       headers: {
@@ -210,7 +240,8 @@ Bab 1: (Judul bab di sini)
     console.log(`Sukses! Novel "${finalTitle}" berhasil terbit.`);
   } catch (err) {
     console.error('Terjadi eror saat eksekusi:', err);
-    await updateTaskStatus(task.id, 'gagal');
+    // Kembalikan ke 'rencana' agar tidak hangus dan bisa dicoba ulang pada putaran berikutnya
+    await updateTaskStatus(task.id, 'rencana');
     process.exit(1);
   }
 }
